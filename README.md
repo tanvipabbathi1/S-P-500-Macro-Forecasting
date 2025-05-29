@@ -2,6 +2,8 @@
 
 Predictive models to analyze the impact of macroeconomic indicators on S&P 500 movement using advanced statistical and machine learning techniques.
 
+This project was completed as part of a group for a course at the University of Pennsylvania.
+
 ## Overview
 
 This project explores whether macroeconomic indicators—such as consumer spending, TSA checkpoint volume, and the Federal Funds Rate—can be used to predict the daily movement of the S&P 500. We investigate relationships between key economic sectors and market behavior to answer high-impact questions for investors.
