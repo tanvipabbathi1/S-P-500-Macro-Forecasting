@@ -1,4 +1,4 @@
-# S&P 500 Macro Forecasting 📈
+# S&P 500 Macro Forecasting 
 
 Predictive models to analyze the impact of macroeconomic indicators on S&P 500 movement using advanced statistical and machine learning techniques.
 
