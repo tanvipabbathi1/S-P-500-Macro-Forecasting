@@ -1,0 +1,282 @@
+---
+title: 'S&P 500 Macro Forecasting'
+author:
+- Tanvi Pabbathi
+date: "May 4, 2025"
+output:
+  html_document:
+    highlight: haddock
+    theme: lumen
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+    number_sections: false
+  pdf_document:
+    toc: true
+    toc_depth: '4'
+  word_document:
+    toc: true
+    toc_depth: '4'
+urlcolor: blue
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 999, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, glmnet, coefplot, car, pROC, caret)
+
+install.packages("readxl", repos = "http://cran.us.r-project.org")
+library(readxl)
+
+```
+
+\newpage
+
+# Section 1. EDA
+
+Note: this section was written by my partner
+
+We began by looking at some of the basics of the data, including the distribution of the S&P itself. Additionally, we broke out the data into subsets that only included information relevant to tech and commodities for use in later analysis. We started by cleaning the data, which included converting it, as it needed to be transposed before it could be used. We also removed duplicate columns, as Second Measure has the tendency to include one piece of data several times. This left us with around 113 variables, which I will explore more in depth throughout the EDA process.
+
+```{r, suppressWarnings = TRUE, include=FALSE}
+df <- suppressWarnings(readxl::read_excel("second_measure.xlsx"))
+df <- df[ , -1]
+df <- df[!is.na(df$Series), ]     
+df <- df[!duplicated(df$Series), ]
+df_n <- df
+```
+
+```{r, suppressWarnings = TRUE, include=FALSE}
+rownames(df) <- df[[1]]
+
+df_t <- as.data.frame(t(df))
+
+df_t <- df_t[-1, ]
+
+df_t <- df_t[1:212, ]
+
+library(dplyr)
+
+
+df_t <- df_t %>% mutate(across(everything(), as.numeric))
+
+df <- df_t
+df <- df[, 1:(ncol(df) - 3)]
+```
+
+\newpage
+# Section 2. LASSO for Multiple Regression
+
+For our first model, we want to perform multiple regression on our dataset with a goal of predicting SPX. Additionally, since we have a large number of features in our dataset, we chose to use LASSO as a shrinkage method. 
+
+```{r, echo = FALSE, include = FALSE}
+library(glmnet)
+library(dplyr)
+```
+
+```{r, echo = FALSE}
+set.seed(123)
+colnames(df) <- make.names(colnames(df))
+
+Y <- as.matrix(df[, 'SPX'])
+X <- model.matrix(~ ., data = df[, colnames(df) != "SPX"])
+cv_model <- cv.glmnet(X, Y, alpha = 1)
+plot(cv_model)
+```
+
+```{r, echo = FALSE}
+best_lambda <- cv_model$lambda.min
+lasso_model <- glmnet(X, Y, alpha = 1, lambda = best_lambda)
+coef.force.min <- coef(lasso_model)
+var.min <- rownames(as.matrix(coef.force.min[which(coef.force.min != 0),][-1])) 
+
+lasso_sub <- dplyr::select(df, SPX, all_of(var.min))
+
+model2_lasso <- lm(SPX ~ ., data = lasso_sub)
+
+s <- summary(model2_lasso)
+coefs <- s$coefficients
+coefs_no_intercept <- coefs[rownames(coefs) != "(Intercept)", ]
+ordered_coefs <- coefs_no_intercept[order(coefs_no_intercept[, 4]), ]
+top10 <- head(ordered_coefs, 10)
+lasso_selected <- colnames(lasso_sub)
+top10_lasso_sub <- lasso_sub[, 1:10]
+
+# Get their column names
+lasso_selected <- colnames(top10_lasso_sub)
+```
+
+```{r, echo = FALSE}
+library(knitr)
+
+# Convert to data frame
+lasso_selected_df <- data.frame(Selected_Variables = lasso_selected)
+
+# Pretty table
+kable(top10, caption = "Top LASSO-Selected Predictors for SPX")
+```
+
+Based on our linear regression, we see that our R^2 value is quite high (meaning our model was good at predicting the data) at 0.95. Now, we use backwards selection to only keep the most significant variables for our model. Additionally, we see that most features have become statistically insiginificant following our LASSO. Features that are still significant include "Building.Material.and.Garden.Equipment.and.Supplies.Dealers", "DFF", etc (there are many, but chose not to list all of them here). 
+
+Next, we chose to use backwards selection as a mechanism to reduce the number of features we are modelling on following LASSO. This way, we are only keeping the most significant features for our model. 
+```{r, echo = FALSE}
+library(leaps)
+
+df_clean <- df[complete.cases(df), ]
+
+back_model <- regsubsets(SPX ~ ., data = df_clean, nvmax = 30, method = "backward")
+
+summary_back <- summary(back_model)
+which.min(summary_back$bic)  
+
+selected_vars <- names(coef(back_model, which.min(summary_back$bic)))
+```
+The list above shows the selected features to keep following backward selection (25) including the intercept. 
+```{r, echo = FALSE}
+predictors <- selected_vars[selected_vars != "(Intercept)"]
+
+formula_back <- as.formula(paste("SPX ~", paste(predictors, collapse = " + ")))
+
+model_backward <- lm(formula_back, data = df_clean)
+s <- summary(model_backward)
+coefs <- s$coefficients
+coefs_no_intercept <- coefs[rownames(coefs) != "(Intercept)", ]
+ordered_coefs <- coefs_no_intercept[order(coefs_no_intercept[, 4]), ]
+top10 <- head(ordered_coefs, 10)
+```
+
+```{r, echo = FALSE}
+library(knitr)
+
+
+# Pretty table
+kable(top10, caption = "Top Predicted Following Backwards Selection")
+```
+
+From the summary of the final model following backwards selection, we see that variables such as "Online" have a large negative coefficient, meaning they are inversely proportional to SPX. Variables such as "Book..Periodical..and.Music.Stores" have very large positive coefficients, meaning they are proportional to an increased SPX.
+
+```{r, echo = FALSE}
+AIC(model_backward)
+```
+
+```{r, echo = FALSE}
+AIC(model2_lasso)
+```
+
+From our comparison, we actually see that the LASSO fitted model has a lower AIC than the backward selection model, meaning that the LASSO model has a better tradeoff between model fit and complexity.
+
+\newpage
+# Section 3. Logistic Regression
+
+```{r, echo = FALSE}
+df$SPX_up <- ifelse(df$SPX > dplyr::lag(df$SPX), 1, 0)
+df <- df[complete.cases(df), ]  # Remove first row with NA from lag
+
+log_model <- glm(SPX_up ~ ., data = dplyr::select(df, -SPX), family = binomial)
+
+s <- summary(log_model)
+coefs <- s$coefficients
+coefs_no_intercept <- coefs[rownames(coefs) != "(Intercept)", ]
+ordered_coefs <- coefs_no_intercept[order(coefs_no_intercept[, 4]), ]
+top10 <- head(ordered_coefs, 10)
+```
+
+```{r, echo = FALSE}
+library(knitr)
+
+# Pretty table
+kable(top10, caption = "Top Predicted Following Backwards Selection")
+```
+Our logistic regression has an AIC of 314, which we can compare to the boosted model coming next. 
+
+Additionally, we evaluate the performance of the model, such as ROC curve and accuracy, more directly with statistics in Section 4, where we are able to directly compare performance with the boosted model. Overall, though, the model performs quite well, with an accuracy of around $88.6\%$. Additionally, we can seem to see some patterns in the regression, as it seems that there is much weight given to manufacturing related spending, as they make up 5 of the top 10 variables by significance in the regression. This focus on one industry paints an interesting picture, as we do not tend to think of manufacturing as extremely decisive towards the direction of the stock market—tech industries usually take that place. However, manufacturing has long been a pillar of the US economy, and often serves as a spending multiplier in poor economic times. Thus, this nuance could be something the model picked up on.
+
+However, as we discuss later, the boosted model, which covered a more diverse array of variables, did end up performing better in the end. Thus, this focus on one industry could have potentially been detractive to the final performance of the Logistic Regression. We delve more into this comparative in Section 4, however.
+
+\newpage
+# Section 4. Boosting
+```{r, echo = FALSE}
+install.packages("gbm", repos = "http://cran.us.r-project.org")
+library(gbm)
+
+set.seed(20250331)
+
+boost_model <- gbm(SPX_up ~ ., 
+                   data = dplyr::select(df, -SPX), 
+                   distribution = "bernoulli",
+                   n.trees = 1000,
+                   interaction.depth = 3,
+                   shrinkage = 0.01,
+                   cv.folds = 5)
+
+# Get variable importance (relative influence)
+var_importance <- invisible(summary(boost_model, plotit = TRUE))
+
+# Extract top 10 variables
+top10 <- head(var_importance[order(var_importance$rel.inf, decreasing = TRUE), ], 10)
+```
+
+```{r, echo = FALSE}
+library(knitr)
+
+# Pretty table
+kable(top10, caption = "Top Predicted Following Backwards Selection")
+```
+
+```{r, echo = FALSE}
+summary(boost_model, plotit = TRUE)
+```
+
+The variable importance graph highlights the most influential predictors in our Boosting model by measuring each variable's relative contribution to reducing classification error. Variables with higher importance scores had a greater impact on the model's ability to correctly predict whether the S&P 500 would increase on a given day.
+
+```{r, echo = FALSE}
+
+install.packages("pROC", repos = "http://cran.us.r-project.org")
+install.packages("caret", repos = "http://cran.us.r-project.org")
+
+library(pROC)
+library(caret)
+
+log_probs <- predict(log_model, type = "response")
+boost_probs <- predict(boost_model, newdata = df, n.trees = 1000, type = "response")
+
+roc_log <- roc(df$SPX_up, log_probs)
+roc_boost <- roc(df$SPX_up, boost_probs)
+
+plot(roc_log, col = "blue", main = "ROC Curve: Logistic vs Boosting")
+lines(roc_boost, col = "red")
+legend("bottomright", legend = c("Logistic", "Boosting"), col = c("blue", "red"), lwd = 2)
+```
+
+```{r, echo = FALSE}
+auc_log <- auc(roc_log)
+auc_boost <- auc(roc_boost)
+
+log_preds <- ifelse(log_probs > 0.5, 1, 0)
+boost_preds <- ifelse(boost_probs > 0.5, 1, 0)
+
+cmLR <- confusionMatrix(factor(log_preds), factor(df$SPX_up), positive = "1")
+cmBoost <- confusionMatrix(factor(boost_preds), factor(df$SPX_up), positive = "1")
+
+cmLR
+cmBoost
+```
+
+```{r, echo = FALSE}
+library(knitr)
+
+# Convert to data frame
+lasso_selected_df <- data.frame(Selected_Variables = lasso_selected)
+
+# Pretty table
+kable(top10, caption = "Top Predicted Following Backwards Selection")
+```
+
+To evaluate the classification performance of our models, we compared logistic regression and gradient boosting using confusion matrices and standard metrics. The boosting model outperformed logistic regression across the board, achieving a higher overall accuracy (94.3% vs. 88.6%) and better balanced accuracy (0.908 vs. 0.850). Notably, boosting achieved perfect specificity, correctly identifying all instances where the S&P 500 did not increase, and demonstrated stronger sensitivity (0.815 vs. 0.754), indicating more accurate detection of positive market movements. The model also exhibited a perfect positive predictive value, meaning every predicted increase in the S&P 500 was correct. The results highlight that boosting overall was a better model at predicting whether SPX would increase. 
+
+Indeed, as we discussed prior, boosting included a wider array of significant predictive variables, in terms of sector. Thus, this confirms our hypothesis that looking at the economy as a whole is necessary to understand how the SPX will move. Still, the Logistic Regression helped us understand one particular valuable set of predictors, namely variables relating to the manufacturing sector, as honing in on that sector performed only moderately worse than allowing for a wider, more complex variety in our predictors.  
