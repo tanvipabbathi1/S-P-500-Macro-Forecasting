@@ -17,7 +17,6 @@ This project explores whether macroeconomic indicators—such as consumer spendi
 ## Methodology
 
 - **Data Sources**: Bloomberg Terminal, Bloomberg Second Measure, FRED (Federal Reserve Economic Data)
-- **Exploratory Data Analysis**: Dimensionality reduction (PCA), correlation matrices, heatmaps
 - **Modeling Techniques**:
   - Logistic Regression
   - LASSO Regularization
@@ -29,16 +28,9 @@ This project explores whether macroeconomic indicators—such as consumer spendi
 
 - Specific indicators like debit card spending, TSA data, and interest rate shifts showed significant correlation with SPX movement.
 - Logistic regression on select sectors achieved improved accuracy over baseline random walk models.
-- PCA and clustering revealed meaningful groupings among macroeconomic features, allowing for simplified modeling.
 
 ## Technologies Used
 
-- **R**: Data cleaning, visualization, modeling
+- **R**
 - **ggplot2**, **dplyr**, **MASS**, **glmnet**
 - **Bloomberg** and **FRED** data ingestion
-
-## Results
-
-- Achieved significant reduction in feature space using PCA and LASSO
-- Built interpretable models that highlight actionable financial indicators
-- Laid groundwork for future real-time macroeconomic prediction systems
